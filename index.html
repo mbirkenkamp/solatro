@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Solatro – Vue in the browser</title>
+  <!-- Tailwind (CDN) for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 (CDN) -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    html, body { height: 100%; }
+    body { background: #0b1020; color: #e7e7f2; }
+    .card { aspect-ratio: 2/3; }
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="app" class="max-w-6xl mx-auto p-4 md:p-6">
+    <header class="flex flex-col md:flex-row gap-3 md:items-end md:justify-between mb-6">
+      <div>
+        <h1 class="text-3xl md:text-4xl font-black tracking-tight">🃏 SOLATRO</h1>
+        <p class="text-sm/5 text-indigo-200/80">A solo Balatro-ish card game in your browser. State is saved locally.</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button @click="newGame()" class="px-3 py-2 rounded-2xl bg-red-500/90 hover:bg-red-500 font-semibold">New Game</button>
+        <button @click="saveState(true)" class="px-3 py-2 rounded-2xl bg-sky-500/90 hover:bg-sky-500 font-semibold">Save</button>
+        <button @click="loadState(true)" class="px-3 py-2 rounded-2xl bg-emerald-500/90 hover:bg-emerald-500 font-semibold">Load</button>
+        <button @click="hardReset()" class="px-3 py-2 rounded-2xl bg-zinc-700/70 hover:bg-zinc-700 font-semibold">Hard Reset</button>
+      </div>
+    </header>
+
+    <!-- Top row: Round, Targets, Bank & Shop Points -->
+    <section class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+      <div class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+        <div class="text-xs text-white/60">Round</div>
+        <div class="text-2xl font-bold">{{ state.round }}</div>
+      </div>
+      <div class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+        <div class="text-xs text-white/60">Target</div>
+        <div class="text-2xl font-bold">{{ targetForRound(state.round) }}</div>
+      </div>
+      <div class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+        <div class="text-xs text-white/60">Score (this round)</div>
+        <div class="text-2xl font-bold">{{ state.scoreThisRound }}</div>
+      </div>
+      <div class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+        <div class="text-xs text-white/60">Bonus Points (shop)</div>
+        <div class="text-2xl font-bold">{{ state.bonusPoints }}</div>
+      </div>
+    </section>
+
+    <!-- Actions row -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+      <div class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+        <div class="flex gap-4 items-center flex-wrap">
+          <div>
+            <div class="text-xs text-white/60">Plays left</div>
+            <div class="text-xl font-semibold">{{ state.playsLeft }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-white/60">Discards left</div>
+            <div class="text-xl font-semibold">{{ state.discardsLeft }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-white/60">Hand limit</div>
+            <div class="text-xl font-semibold">{{ handLimit }}</div>
+          </div>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button :disabled="!canPlay" @click="playSelected()"
+                  class="px-3 py-2 rounded-2xl font-semibold"
+                  :class="canPlay ? 'bg-emerald-500/90 hover:bg-emerald-500' : 'bg-zinc-700/60 cursor-not-allowed'">
+            Play Selected (≤5)
+          </button>
+          <button :disabled="!canDiscard" @click="discardSelected()"
+                  class="px-3 py-2 rounded-2xl font-semibold"
+                  :class="canDiscard ? 'bg-amber-500/90 hover:bg-amber-500' : 'bg-zinc-700/60 cursor-not-allowed'">
+            Discard (1–5)
+          </button>
+          <button :disabled="!canDraw" @click="drawUpToLimit()"
+                  class="px-3 py-2 rounded-2xl font-semibold"
+                  :class="canDraw ? 'bg-sky-500/90 hover:bg-sky-500' : 'bg-zinc-700/60 cursor-not-allowed'">
+            Draw
+          </button>
+          <button v-if="state.tokens.pocketPoints.owned" :disabled="state.tokens.pocketPoints.usedThisRound" @click="usePocketPoints()"
+                  class="px-3 py-2 rounded-2xl font-semibold"
+                  :class="state.tokens.pocketPoints.usedThisRound ? 'bg-zinc-700/60 cursor-not-allowed' : 'bg-fuchsia-500/90 hover:bg-fuchsia-500'">
+            Use Pocket Points (+25)
+          </button>
+          <button v-if="state.tokens.doubleScore.owned" :disabled="state.tokens.doubleScore.armed"
+                  @click="armDoubleScore()"
+                  class="px-3 py-2 rounded-2xl font-semibold"
+                  :class="state.tokens.doubleScore.armed ? 'bg-zinc-700/60 cursor-not-allowed' : 'bg-purple-500/90 hover:bg-purple-500'">
+            Arm Double Score
+          </button>
+        </div>
+        <p class="text-xs text-white/60 mt-2">Tip: Click cards to select. You may optionally include your banked Joker in a play.</p>
+      </div>
+
+      <!-- Banked Joker & Game Status -->
+      <div class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+        <div class="flex items-center justify-between">
+          <div class="font-semibold">Banked Joker</div>
+          <div class="text-lg">{{ state.bankedJokers }} / 1</div>
+        </div>
+        <div class="mt-3 flex gap-2">
+          <button :disabled="state.bankedJokers === 0 || state.addBankedJokerToPlay" @click="toggleUseBankedJoker()"
+                  class="px-3 py-2 rounded-2xl font-semibold"
+                  :class="state.bankedJokers === 0 ? 'bg-zinc-700/60 cursor-not-allowed' : (state.addBankedJokerToPlay ? 'bg-emerald-600' : 'bg-emerald-500/90 hover:bg-emerald-500')">
+            {{ state.addBankedJokerToPlay ? 'Using in next play' : 'Use in next play' }}
+          </button>
+        </div>
+        <div v-if="state.gameOver" class="mt-4 p-3 rounded-xl bg-red-500/20 ring-1 ring-red-500/30">
+          <div class="font-bold">Game Over!</div>
+          <div class="text-sm">You reached round {{ state.round }}.</div>
+        </div>
+      </div>
+
+      <!-- Shop -->
+      <div class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+        <div class="flex items-center justify-between">
+          <div class="font-semibold">Bonus Shoppe</div>
+          <div class="text-xs text-white/60">Own max 1 of each</div>
+        </div>
+        <div class="mt-3 grid grid-cols-1 gap-2">
+          <div v-for="b in shopList" :key="b.key" class="p-3 rounded-xl bg-white/5 ring-1 ring-white/10">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="font-semibold">{{ b.name }} <span class="text-white/50">• {{ b.cost }}</span></div>
+                <div class="text-xs text-white/70">{{ b.desc }}</div>
+                <div v-if="b.key==='shield' && state.tokens.shield.owned" class="text-xs text-amber-400 mt-1">Shield available: prevents the next failed round (consumed when used).</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs px-2 py-1 rounded-full" :class="state.tokens[b.key].owned ? 'bg-emerald-600/40 ring-1 ring-emerald-500/40' : 'bg-white/10 ring-1 ring-white/10'">{{ state.tokens[b.key].owned ? 'Owned' : 'Not owned' }}</span>
+                <button @click="buy(b.key)"
+                        :disabled="state.tokens[b.key].owned || state.bonusPoints < b.cost"
+                        class="px-3 py-2 rounded-2xl font-semibold"
+                        :class="(state.tokens[b.key].owned || state.bonusPoints < b.cost) ? 'bg-zinc-700/60 cursor-not-allowed' : 'bg-rose-500/90 hover:bg-rose-500'">
+                  Buy
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hand -->
+    <section class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10 mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold">Your Hand</div>
+        <div class="text-xs text-white/60">Select up to 5 cards to play • 1–5 to discard</div>
+      </div>
+      <div class="flex gap-2 overflow-x-auto scrollbar-hide py-1">
+        <div v-for="(c,idx) in state.hand" :key="c.id"
+             class="card w-24 rounded-xl border border-white/20 bg-white text-zinc-900 flex flex-col justify-between p-2 select-none cursor-pointer hover:scale-[1.02] transition"
+             :class="[isRed(c) ? 'text-red-600' : 'text-zinc-900', selected.has(idx) ? 'ring-4 ring-sky-400' : '']"
+             @click="toggleSelect(idx)">
+          <template v-if="c.rank !== 'JK'">
+            <div class="text-lg font-bold">{{ c.rank }}</div>
+            <div class="text-3xl text-center">{{ suitSymbol(c.suit) }}</div>
+            <div class="text-right text-lg font-bold">{{ c.rank }}</div>
+          </template>
+          <template v-else>
+            <div class="text-lg font-bold">JOKER</div>
+            <div class="text-3xl text-center">🃏</div>
+            <div class="text-right text-lg font-bold">JOKER</div>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- Log -->
+    <section class="bg-white/5 rounded-2xl p-4 ring-1 ring-white/10">
+      <div class="font-semibold mb-2">Log</div>
+      <div class="max-h-56 overflow-auto space-y-1 text-sm pr-2">
+        <div v-for="(l,i) in state.log" :key="i" class="text-white/80">
+          {{ l }}
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const { createApp, reactive, computed, watch } = Vue;
+
+    // Utility: RNG & IDs
+    function uid() { return Math.random().toString(36).slice(2)+Date.now().toString(36); }
+    function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
+
+    // Build a standard 54-card deck (2 jokers)
+    function buildDeck(){
+      const suits=['H','D','C','S'];
+      const ranks=['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+      const deck=[];
+      for(const s of suits){ for(const r of ranks){ deck.push({id:uid(), rank:r, suit:s}); } }
+      // two jokers (no suit)
+      deck.push({id:uid(), rank:'JK', suit:null});
+      deck.push({id:uid(), rank:'JK', suit:null});
+      return shuffle(deck);
+    }
+
+    // Hand ranking helpers (with Jokers wildcard support up to 2)
+    const RANK_ORDER = { '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14 };
+
+    function evaluateHand(cards, jokers){
+      // cards: array of non-joker cards, each {rank,suit}; jokers: 0..2 included in the play
+      // Return {name, points}
+      // Points per rules
+      const SCORES = {
+        'Royal Flush':150,
+        'Straight Flush':125,
+        'Four of a Kind':100,
+        'Full House':60,
+        'Flush':50,
+        'Straight':40,
+        'Three of a Kind':30,
+        'Two Pair':20,
+        'Pair':10,
+        'High Card':5,
+      };
+
+      // counts
+      const ranks = {};
+      const suits = {};
+      for(const c of cards){ ranks[c.rank] = (ranks[c.rank]||0)+1; suits[c.suit]=(suits[c.suit]||0)+1; }
+      const counts = Object.values(ranks).sort((a,b)=>b-a);
+
+      // Helper to test N-of-a-kind with jokers
+      const canMakeKind = (n)=>{ for(const r in ranks){ if(ranks[r]+jokers >= n) return true; } return jokers>=n; };
+
+      // Flush / Straight logic
+      const hasFlush = ()=>{ for(const s in suits){ if(suits[s]+jokers >= 5) return true; } return false; };
+
+      function hasStraight(){
+        // Build unique rank values; A can be low (1)
+        const vals = new Set(cards.map(c=>RANK_ORDER[c.rank]));
+        // try all windows 10..A and A-low straight (A,2,3,4,5)
+        const trySeq = (start)=>{
+          let missing=0;
+          for(let v=start; v<start+5; v++){
+            if(!vals.has(v)) missing++;
+            if(missing>jokers) return false;
+          }
+          return true;
+        };
+        for(let s=2; s<=10; s++){ if(trySeq(s)) return true; }
+        // wheel straight A-2-3-4-5 (treat A=14, need 14,2,3,4,5)
+        const needWheel = [14,2,3,4,5];
+        let missing=0; for(const v of needWheel){ if(!vals.has(v)) missing++; }
+        return missing<=jokers;
+      }
+
+      function hasStraightFlush(){
+        // try per suit
+        for(const s in suits){
+          const suited = cards.filter(c=>c.suit===s);
+          const vals = new Set(suited.map(c=>RANK_ORDER[c.rank]));
+          const jokersHere = jokers; // any joker can assume this suit
+          const trySeq = (start)=>{
+            let missing=0;
+            for(let v=start; v<start+5; v++){
+              if(!vals.has(v)) missing++;
+              if(missing>jokersHere) return false;
+            }
+            return true;
+          };
+          for(let st=2; st<=10; st++){ if(trySeq(st)) return true; }
+          const wheel=[14,2,3,4,5];
+          let miss=0; for(const v of wheel){ if(!vals.has(v)) miss++; }
+          if(miss<=jokersHere) return true;
+        }
+        // also possible if we have <5 suited but jokers can take suit — already handled by allowing jokersHere to fill any missing
+        return false;
+      }
+
+      function hasRoyalFlush(){
+        const needed = new Set(['10','J','Q','K','A']);
+        for(const s in suits){
+          const present = new Set(cards.filter(c=>c.suit===s).map(c=>c.rank));
+          let missing=0; needed.forEach(r=>{ if(!present.has(r)) missing++; });
+          if(missing<=jokers) return true;
+        }
+        return false;
+      }
+
+      // Check in descending order
+      if(cards.length + jokers < 5){ return {name:'High Card', points:SCORES['High Card']}; }
+      if(hasRoyalFlush()) return {name:'Royal Flush', points:SCORES['Royal Flush']};
+      if(hasStraightFlush()) return {name:'Straight Flush', points:SCORES['Straight Flush']};
+      if(canMakeKind(4)) return {name:'Four of a Kind', points:SCORES['Four of a Kind']};
+      // Full house: can we make 3 + 2
+      const canTrips = canMakeKind(3);
+      let canPair=false;
+      for(const r in ranks){ if(ranks[r]>=2) canPair=true; }
+      if(!canPair && jokers>0){
+        // Use remaining jokers after making trips hypothetically
+        if(canTrips) canPair = true; // remaining joker(s) can form a pair with any single
+      }
+      if(canTrips && canPair) return {name:'Full House', points:SCORES['Full House']};
+      if(hasFlush()) return {name:'Flush', points:SCORES['Flush']};
+      if(hasStraight()) return {name:'Straight', points:SCORES['Straight']};
+      if(canMakeKind(3)) return {name:'Three of a Kind', points:SCORES['Three of a Kind']};
+      // Two pair
+      let pairs=0; for(const r in ranks){ if(ranks[r]>=2) pairs++; }
+      if(pairs>=2) return {name:'Two Pair', points:SCORES['Two Pair']};
+      if(pairs===1 && jokers>=1) return {name:'Two Pair', points:SCORES['Two Pair']};
+      if(pairs===0 && jokers>=2) return {name:'Pair', points:SCORES['Pair']};
+      if(pairs===0 && jokers===1) return {name:'Pair', points:SCORES['Pair']};
+      if(pairs>=1) return {name:'Pair', points:SCORES['Pair']};
+      return {name:'High Card', points:SCORES['High Card']};
+    }
+
+    createApp({
+      setup(){
+        const initial = () => ({
+          round: 1,
+          deck: buildDeck(),
+          hand: [],
+          discard: [],
+          playedThisRound: [], // cards set aside after plays
+          playsLeft: 3,
+          discardsLeft: 3,
+          bankedJokers: 0,
+          addBankedJokerToPlay: false,
+          scoreThisRound: 0,
+          bonusPoints: 0, // currency for shop – from excess points
+          tokens: {
+            extraCard: { owned:false },
+            extraDiscard: { owned:false },
+            pocketPoints: { owned:false, usedThisRound:false },
+            extraHand: { owned:false },
+            doubleScore: { owned:false, armed:false },
+            shield: { owned:false }, // consumed on fail
+          },
+          log: [],
+          gameOver: false,
+        });
+
+        const state = reactive(initial());
+        const selected = reactive(new Set());
+
+        const handLimit = computed(()=> 8 + (state.tokens.extraCard.owned ? 1 : 0));
+
+        const shopList = [
+          { key:'extraCard', cost:10, name:'Extra Card', desc:'+1 card in your hand each round' },
+          { key:'extraDiscard', cost:25, name:'Extra Discard', desc:'+1 discard per round' },
+          { key:'pocketPoints', cost:50, name:'Pocket Points', desc:'Activate to add +25 to your score this round' },
+          { key:'extraHand', cost:75, name:'Extra Hand', desc:'Play +1 extra hand each round' },
+          { key:'doubleScore', cost:100, name:'Double Score', desc:'Doubles the points from your next play (once per round)' },
+          { key:'shield', cost:150, name:'Shield', desc:'Ignore one failed round (consumed on use)' },
+        ];
+
+        // Helpers for UI
+        const isRed = (c)=> c.suit==='H' || c.suit==='D';
+        const suitSymbol = (s)=> ({H:'♥',D:'♦',C:'♣',S:'♠'}[s] || '');
+
+        function targetForRound(r){ return 25 * r; }
+
+        // Draw a single card, handling Joker banking/replacement rules
+        function drawOne(){
+          if(state.deck.length===0){
+            // reshuffle discard into deck if needed
+            state.deck = shuffle([...state.discard]);
+            state.discard = [];
+          }
+          const c = state.deck.pop();
+          if(!c) return null;
+          if(c.rank==='JK'){
+            if(state.bankedJokers===0){
+              state.bankedJokers = 1;
+              state.log.unshift('Drew a Joker → banked it!');
+              return drawOne(); // replace into hand
+            } else {
+              // already have one banked → lose both, then replace
+              state.bankedJokers = 0;
+              state.log.unshift('Oh no! Another Joker showed up while one was banked → you lose BOTH!');
+              return drawOne();
+            }
+          }
+          return c;
+        }
+
+        function drawUpToLimit(){
+          while(state.hand.length < handLimit.value){
+            const c = drawOne();
+            if(!c) break; // no cards
+            state.hand.push(c);
+          }
+        }
+
+        function startRound(r){
+          // reset per-round variables
+          state.playsLeft = 3 + (state.tokens.extraHand.owned ? 1 : 0);
+          state.discardsLeft = 3 + (state.tokens.extraDiscard.owned ? 1 : 0);
+          state.scoreThisRound = 0;
+          state.playedThisRound = [];
+          state.tokens.pocketPoints.usedThisRound = false;
+          state.tokens.doubleScore.armed = false;
+          state.addBankedJokerToPlay = false;
+          selected.clear();
+          // draw hand
+          state.hand = [];
+          drawUpToLimit();
+          state.log.unshift(`— Round ${r} begins (Target ${targetForRound(r)}) —`);
+        }
+
+        function newGame(){
+          const seed = initial();
+          Object.assign(state, seed);
+          state.log = [];
+          state.log.unshift('New game started.');
+          startRound(1);
+          saveState();
+        }
+
+        function toggleSelect(idx){ if(selected.has(idx)) selected.delete(idx); else selected.add(idx); }
+
+        const canPlay = computed(()=> !state.gameOver && state.playsLeft>0 && selected.size>0 && selected.size<=5);
+        const canDiscard = computed(()=> !state.gameOver && state.discardsLeft>0 && selected.size>=1 && selected.size<=5);
+        const canDraw = computed(()=> !state.gameOver && state.hand.length < handLimit.value);
+
+        function removeFromHand(indices){
+          // remove by index set (from highest to lowest)
+          const idxs = [...indices].sort((a,b)=>b-a);
+          const removed=[];
+          for(const i of idxs){ removed.push(state.hand.splice(i,1)[0]); }
+          return removed;
+        }
+
+        function addToDiscard(cards){ state.discard.push(...cards); }
+
+        function playSelected(){
+          if(!canPlay.value) return;
+          const idxs = new Set([...selected]);
+          const chosen = removeFromHand(idxs);
+          selected.clear();
+
+          // Add banked joker if chosen
+          let jokersUsed = 0;
+          if(state.addBankedJokerToPlay && state.bankedJokers>0){
+            jokersUsed = 1;
+            state.bankedJokers = 0; // it is consumed when used
+            state.addBankedJokerToPlay = false;
+          }
+
+          const nonJokers = chosen.filter(c=>c.rank!=='JK');
+          const evalRes = evaluateHand(nonJokers, jokersUsed);
+          let pts = evalRes.points;
+          if(state.tokens.doubleScore.owned && state.tokens.doubleScore.armed){ pts *= 2; state.tokens.doubleScore.armed=false; state.log.unshift('Double Score consumed: points doubled!'); }
+
+          state.scoreThisRound += pts;
+          state.playedThisRound.push(...chosen);
+          state.playsLeft--;
+          state.log.unshift(`Played (${evalRes.name}) for ${pts} points.`);
+
+          // Refill hand
+          drawUpToLimit();
+          saveState();
+
+          // If no plays left, end-of-round resolution
+          if(state.playsLeft===0){ endRound(); }
+        }
+
+        function discardSelected(){
+          if(!canDiscard.value) return;
+          const count = selected.size;
+          const disc = removeFromHand(selected);
+          selected.clear();
+          addToDiscard(disc);
+          state.discardsLeft--;
+          state.log.unshift(`Discarded ${count} card${count>1?'s':''}.`);
+          drawUpToLimit();
+          saveState();
+        }
+
+        function usePocketPoints(){
+          if(!state.tokens.pocketPoints.owned || state.tokens.pocketPoints.usedThisRound) return;
+          state.scoreThisRound += 25;
+          state.tokens.pocketPoints.usedThisRound = true;
+          state.log.unshift('Pocket Points used: +25 this round.');
+          saveState();
+        }
+
+        function armDoubleScore(){
+          if(!state.tokens.doubleScore.owned || state.tokens.doubleScore.armed) return;
+          state.tokens.doubleScore.armed = true;
+          state.log.unshift('Double Score armed for your next play.');
+          saveState();
+        }
+
+        function endRound(){
+          const target = targetForRound(state.round);
+          const met = state.scoreThisRound >= target;
+          if(met){
+            const excess = state.scoreThisRound - target;
+            if(excess>0){ state.bonusPoints += excess; state.log.unshift(`Round ${state.round} cleared! Excess ${excess} → added to Bonus Points.`); }
+            else state.log.unshift(`Round ${state.round} cleared exactly.`);
+            // cleanup: return played/discarded/hand to deck and reshuffle for next round
+            state.deck = shuffle([...state.deck, ...state.discard, ...state.playedThisRound, ...state.hand]);
+            state.discard = []; state.playedThisRound = []; state.hand = [];
+            state.round++;
+            startRound(state.round);
+          } else {
+            if(state.tokens.shield.owned){
+              // consume shield
+              state.tokens.shield.owned = false;
+              state.log.unshift('Shield saved you from failing this round. Advancing anyway!');
+              // same cleanup as success but no bonus points
+              state.deck = shuffle([...state.deck, ...state.discard, ...state.playedThisRound, ...state.hand]);
+              state.discard = []; state.playedThisRound = []; state.hand = [];
+              state.round++;
+              startRound(state.round);
+            } else {
+              state.gameOver = true;
+              state.log.unshift(`You failed Round ${state.round} (needed ${target}). Game Over.`);
+            }
+          }
+          saveState();
+        }
+
+        function buy(key){
+          const item = shopList.find(s=>s.key===key);
+          if(!item) return;
+          if(state.tokens[key].owned || state.bonusPoints < item.cost) return;
+          state.bonusPoints -= item.cost;
+          state.tokens[key].owned = true;
+          if(key==='shield') state.log.unshift('Bought Shield. It will prevent the next failed round (then it breaks).');
+          if(key==='doubleScore') state.tokens.doubleScore.armed = false;
+          if(key==='pocketPoints') state.tokens.pocketPoints.usedThisRound = false;
+          saveState();
+        }
+
+        function toggleUseBankedJoker(){
+          state.addBankedJokerToPlay = !state.addBankedJokerToPlay;
+        }
+
+        // Persistence
+        const STORAGE_KEY = 'solatro_vue_state_v1';
+        function saveState(notify=false){
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          if(notify) state.log.unshift('State saved.');
+        }
+        function loadState(notify=false){
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if(!raw){ if(notify) state.log.unshift('No saved state found.'); return; }
+          try{
+            const parsed = JSON.parse(raw);
+            // Deep merge into reactive state
+            Object.assign(state, initial(), parsed);
+            // Ensure Sets, computed stuff
+            if(!Array.isArray(state.deck)) state.deck = buildDeck();
+            if(!Array.isArray(state.hand)) state.hand = [];
+            if(!Array.isArray(state.discard)) state.discard = [];
+            if(!Array.isArray(state.playedThisRound)) state.playedThisRound = [];
+            state.log.unshift('State loaded.');
+          }catch(e){ console.error(e); if(notify) state.log.unshift('Failed to load state.'); }
+        }
+
+        function hardReset(){ localStorage.clear(); Object.assign(state, initial()); state.log=[]; startRound(1); }
+
+        // Kick off
+        if(localStorage.getItem('solatro_vue_state_v1')){ loadState(); }
+        else { newGame(); }
+
+        // Auto-save on important changes (throttled by watcher frequency)
+        watch(()=>({
+          round: state.round,
+          playsLeft: state.playsLeft,
+          discardsLeft: state.discardsLeft,
+          scoreThisRound: state.scoreThisRound,
+          bonusPoints: state.bonusPoints,
+          tokens: state.tokens,
+          bankedJokers: state.bankedJokers,
+          deckLen: state.deck.length,
+          handLen: state.hand.length,
+          discardLen: state.discard.length,
+        }), ()=> saveState(), {deep:true});
+
+        return { state, selected, handLimit, shopList, isRed, suitSymbol,
+                 newGame, toggleSelect, canPlay, canDiscard, canDraw,
+                 playSelected, discardSelected, drawUpToLimit, usePocketPoints,
+                 armDoubleScore, targetForRound, toggleUseBankedJoker,
+                 buy, saveState, loadState, hardReset };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
