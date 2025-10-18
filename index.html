@@ -396,6 +396,23 @@
             if(!c) break; // no cards
             state.hand.push(c);
           }
+          sortHand();
+        }
+
+        function sortHand() {
+          const SUIT_ORDER = { 'S': 1, 'H': 2, 'D': 3, 'C': 4 };
+          const RANK_ORDER = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14 };
+          // Sort descending by rank, then by suit order ascending
+          state.hand.sort((a, b) => {
+            const rankA = RANK_ORDER[a.rank] || 0;
+            const rankB = RANK_ORDER[b.rank] || 0;
+            if (rankA === rankB) {
+              const suitA = SUIT_ORDER[a.suit] || 0;
+              const suitB = SUIT_ORDER[b.suit] || 0;
+              return suitA - suitB; // same rank → sort by suit ascending
+            }
+            return rankB - rankA; // inverse order of RANK_ORDER (descending)
+          });
         }
 
         function startRound(r){
