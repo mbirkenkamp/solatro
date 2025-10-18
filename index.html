@@ -4,7 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="manifest" href="manifest.json">
-  <title>Solatro – Vue in the browser</title>
+  <title>Solatro</title>
+
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b1020">
+  <link rel="icon" sizes="192x192" href="images/icon-192.png">
+  <link rel="icon" sizes="512x512" href="images/icon-512.png">
+  <link rel="apple-touch-icon" href="images/icon-192.png">
   <!-- Tailwind (CDN) for quick styling -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Vue 3 (CDN) -->
@@ -587,6 +593,13 @@
                  buy, saveState, loadState, hardReset };
       }
     }).mount('#app');
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+      });
+    }
   </script>
 </body>
 </html>
